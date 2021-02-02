@@ -17,6 +17,7 @@ import math
 
 from pytorch_pretrained_bert.modeling import BertModel,BertEmbeddings,BertPooler,BertEncoder
 
+
 class VocabGraphConvolution(nn.Module):
     """Vocabulary GCN module.
 
@@ -76,6 +77,7 @@ class VocabGraphConvolution(nn.Module):
 
         out=self.fc_hc(fused_H)
         return out
+
 
 class Pretrain_VGCN(nn.Module):
     """Pretrain_VGCN can pre-train the weights of VGCN moduel in the VGCN-BERT. It is also a pure VGCN classification model for word embedding input.

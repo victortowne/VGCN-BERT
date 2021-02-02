@@ -39,13 +39,13 @@ np.random.seed(44)
 Config:
 '''
 parser = argparse.ArgumentParser()
-parser.add_argument('--ds', type=str, default='cola')
-parser.add_argument('--sw', type=int, default=0)
+parser.add_argument('--ds', type=str, default='cola') #数据类型，cola、SST
+parser.add_argument('--sw', type=int, default=0) #是否删除停用词
 args = parser.parse_args()
 cfg_ds = args.ds
 cfg_del_stop_words=True if args.sw==1 else False
 
-dataset_list={'sst', 'cola'}
+dataset_list={'sst', 'cola', 'sst3'}
 
 if cfg_ds not in dataset_list:
     sys.exit("Dataset choice error!")
@@ -55,6 +55,7 @@ dump_dir='data/dump_data'
 if not os.path.exists(dump_dir):
     os.mkdir(dump_dir)
 
+#删除停用词的策略，
 if cfg_del_stop_words:
     freq_min_for_word_choice=5 
     # freq_min_for_word_choice=10 #best
@@ -65,10 +66,12 @@ valid_data_taux = 0.05
 test_data_taux = 0.10
 
 # word co-occurence with context windows
+# 计算词语共现度PMI的窗口大小，窗口越大，越能捕捉到句子的长依赖性
 window_size = 20
 if cfg_ds in ('mr','sst','cola'):
     window_size = 1000 # use whole sentence
 
+# 构建vocab的邻接矩阵时，用tf or tf-idf
 tfidf_mode='only_tf'  
 # tfidf_mode='all_tfidf' 
 
@@ -110,6 +113,7 @@ def del_http_user_tokenize(tweet):
 #%%
 if cfg_ds=='sst':
     from get_sst_data import DataReader
+    #将数据处理成(label, string)形式
     train, valid, test = DataReader("data/SST-2/train.txt","./data/SST-2/dev.txt","./data/SST-2/test.txt").read()
     random.shuffle(train)
     random.shuffle(valid)
@@ -127,14 +131,17 @@ if cfg_ds=='sst':
         for line in data:
             label.append(line[0])
             all_text.append(line[1])
-        dataset["label"] = label
-        dataset["data"] = all_text
+        dataset["label"] = label #标签label list
+        dataset["data"] = all_text #数据content list
     
     label2idx = {label:i for i,label in enumerate(testset['label'])}
     idx2label = {i:label for i,label in enumerate(testset['label'])}
+    #train+valid+test的数据content集合
     corpus=trainset['data']+validset['data']+testset['data']
+    #train+valid+test的数据label集合
     y=np.array(trainset['label']+validset['label']+testset['label'])
     corpus_size=len(corpus)
+    #转换成矩阵的形式
     y_prob=np.eye(corpus_size,len(label2idx))[y]
 
 elif cfg_ds=='cola':
@@ -158,14 +165,14 @@ elif cfg_ds=='cola':
     corpus_size=len(y)
     
 #%%
-doc_content_list=[]
+doc_content_list=[] #train+valid+test的数据content集合，并删除一些特殊字符
 for t in corpus:
-    doc_content_list.append(del_http_user_tokenize(t))
+    doc_content_list.append(del_http_user_tokenize(t)) #删除一些特殊字符
 max_len_seq=0
 max_len_seq_idx=-1
 min_len_seq=1000
 min_len_seq_idx=-1
-sen_len_list=[]
+sen_len_list=[] #记录每条数据doc的长度
 for i,seq in enumerate(doc_content_list):
     seq=seq.split()
     sen_len_list.append(len(seq))
@@ -225,7 +232,7 @@ if cfg_use_bert_tokenizer_at_clean:
     bert_tokenizer = BertTokenizer.from_pretrained(bert_model_scale, do_lower_case=bert_lower_case)
 
 for doc_content in doc_content_list:
-    new_doc = clean_str(doc_content)
+    new_doc = clean_str(doc_content) #去除一些特殊字符
     if cfg_use_bert_tokenizer_at_clean:
         sub_words = bert_tokenizer.tokenize(new_doc)
         sub_doc=' '.join(sub_words).strip()
@@ -237,17 +244,18 @@ for doc_content in doc_content_list:
         else:
             tmp_word_freq[word] = 1
 
+#利用bert分词之后的数据content list
 doc_content_list=new_doc_content_list
 
 # for normal dataset
-clean_docs = []
+clean_docs = [] #去停用词、且根据词频过滤后的数据content list
 count_void_doc=0
 for i,doc_content in enumerate(doc_content_list):
     words = doc_content.split()
     doc_words = []
     for word in words:
         # if tmp_word_freq[word] >= freq_min_for_word_choice:
-        if cfg_ds in ('mr','sst','cola'):
+        if cfg_ds in ('mr','sst','cola'): #不去除停用词，且不根据词频过滤
             doc_words.append(word)
         elif word not in stop_words and tmp_word_freq[word] >= freq_min_for_word_choice:
             doc_words.append(word)
@@ -258,6 +266,7 @@ for i,doc_content in enumerate(doc_content_list):
         # doc_str = 'normal'
         # doc_str = doc_content
         print('No.',i, 'is a empty doc after treat, replaced by \'%s\'. original:%s'%(doc_str,doc_content))
+        #应该加一个continue，不能加，因为数据中混合了所有train valid test data，去除之后数据会缺失错位
     clean_docs.append(doc_str)
 
 
@@ -295,6 +304,7 @@ Build graph
 '''
 print('Build graph...')
 
+#分离出 train valid test data
 if cfg_ds in ('mr', 'sst','cola'):
     shuffled_clean_docs=clean_docs
     train_docs=shuffled_clean_docs[:train_size]
@@ -322,7 +332,7 @@ for doc_words in shuffled_clean_docs:
 
 vocab = list(word_set)
 vocab_size = len(vocab)
-
+#构建字典vocab word-id
 vocab_map = {}
 for i in range(vocab_size):
     vocab_map[vocab[i]] = i
@@ -335,15 +345,15 @@ for doc_words in train_valid_docs:
     for word in words:
         word_set_train_valid.add(word)
 vocab_train_valid = list(word_set_train_valid)
-vocab_train_valid_size = len(vocab_train_valid)
+vocab_train_valid_size = len(vocab_train_valid) #字典大小
     
 #%%
 # a map for word -> doc_list
 if tfidf_mode=='all_tf_train_valid_idf':
-    for_idf_docs = train_valid_docs
+    for_idf_docs = train_valid_docs #训练集+验证集
 else:
-    for_idf_docs = shuffled_clean_docs 
-word_doc_list = {}
+    for_idf_docs = shuffled_clean_docs #训练集+验证集+测试集
+word_doc_list = {} #记录当前word在哪些doc中出现过
 for i in range(len(for_idf_docs)):
     doc_words = for_idf_docs[i]
     words = doc_words.split()
@@ -359,7 +369,7 @@ for i in range(len(for_idf_docs)):
             word_doc_list[word] = [i]
         appeared.add(word)
 
-word_doc_freq = {}
+word_doc_freq = {} #记录word在doc中出现的频次（在多少个不同的doc中出现）
 for word, doc_list in word_doc_list.items():
     word_doc_freq[word] = len(doc_list)
 
@@ -373,7 +383,7 @@ print('Calculate First isomerous adj and First isomorphic vocab adj, get word-wo
 adj_y=np.hstack( ( train_y, np.zeros(vocab_size), valid_y, test_y ))
 adj_y_prob=np.vstack(( train_y_prob, np.zeros((vocab_size,len(label2idx)),dtype=np.float32), valid_y_prob, test_y_prob ))
 
-windows = []
+windows = [] #在windows_size窗口大小内出现的words组合
 for doc_words in train_valid_docs:
     words = doc_words.split()
     length = len(words)
@@ -386,7 +396,7 @@ for doc_words in train_valid_docs:
 
 print('Train_valid size:',len(train_valid_docs),'Window number:',len(windows))
 
-word_window_freq = {}
+word_window_freq = {} #记录每个window出现的次数
 for window in windows:
     appeared = set()
     for i in range(len(window)):
@@ -398,7 +408,7 @@ for window in windows:
             word_window_freq[window[i]] = 1
         appeared.add(window[i])
 
-word_pair_count = {}
+word_pair_count = {} #记录word_i_j对出现的次数
 for window in windows:
     appeared = set()
     for i in range(1, len(window)):
@@ -446,6 +456,7 @@ tmp_max_npmi=0
 tmp_min_npmi=0
 tmp_max_pmi=0
 tmp_min_pmi=0
+#计算word的共现度
 for key in word_pair_count:
     temp = key.split(',')
     i = int(temp[0])

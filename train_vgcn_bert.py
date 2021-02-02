@@ -30,7 +30,7 @@ from pytorch_pretrained_bert.modeling import BertModel, BertConfig, WEIGHTS_NAME
 from pytorch_pretrained_bert.tokenization import BertTokenizer
 from pytorch_pretrained_bert.optimization import BertAdam #, warmup_linear
 from torch.utils.data import DataLoader
-
+logger = logging.getLogger(__name__)
 from utils import *
 
 import random
@@ -49,11 +49,11 @@ Configuration
 '''
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--ds', type=str, default='mr')
-parser.add_argument('--load', type=int, default=0)
-parser.add_argument('--sw', type=int, default='0')
-parser.add_argument('--dim', type=int, default='16')
-parser.add_argument('--lr', type=float, default=1e-5)
+parser.add_argument('--ds', type=str, default='mr') #data_type
+parser.add_argument('--load', type=int, default=0) #if load checkpoint
+parser.add_argument('--sw', type=int, default='0') #if delete stop words
+parser.add_argument('--dim', type=int, default='16') #gcn_embedding_dim
+parser.add_argument('--lr', type=float, default=1e-5) #learning rate
 parser.add_argument('--l2', type=float, default=0.01)
 parser.add_argument('--model', type=str, default='VGCN_BERT')
 args = parser.parse_args()
@@ -106,8 +106,8 @@ do_softmax_before_mse=True
 cfg_loss_criterion='cle'
 model_file_save=cfg_model_type+str(gcn_embedding_dim)+'_model_'+cfg_ds+'_'+cfg_loss_criterion+'_'+"sw"+str(int(cfg_stop_words))+'.pt'
 
-print(cfg_model_type+' Start at:', time.asctime())
-print('\n----- Configure -----',
+logger.info(cfg_model_type+' Start at:', time.asctime())
+logger.info('\n----- Configure -----',
     '\n  cfg_ds:',cfg_ds,
     '\n  stop_words:',cfg_stop_words,
     # '\n  Vocab GCN_hidden_dim: 768 -> 1152 -> 768',
@@ -118,7 +118,7 @@ print('\n----- Configure -----',
     '\n  MAX_SEQ_LENGTH:',MAX_SEQ_LENGTH,#'valid_data_taux',valid_data_taux,
     '\n  perform_metrics_str:',perform_metrics_str,
     '\n  model_file_save:',model_file_save)
-
+logger.info("parse arguments done!")
 
 
 #%%
@@ -126,9 +126,10 @@ print('\n----- Configure -----',
 Prepare data set
 Load vocabulary adjacent matrix
 '''
-print('\n----- Prepare data set -----')
-print('  Load/shuffle/seperate',cfg_ds,'dataset, and vocabulary graph adjacent matrix')
+logger.info('\n----- Prepare data set -----')
+logger.info('  Load/shuffle/seperate',cfg_ds,'dataset, and vocabulary graph adjacent matrix')
 
+#读取graph embedding的图文件
 objects=[]
 names = [ 'labels','train_y','train_y_prob', 'valid_y','valid_y_prob','test_y','test_y_prob', 'shuffled_clean_docs','vocab_adj_tf','vocab_adj_pmi','vocab_map'] 
 for i in range(len(names)):
@@ -140,6 +141,7 @@ lables_list,train_y, train_y_prob,valid_y,valid_y_prob,test_y,test_y_prob, shuff
 label2idx=lables_list[0]
 idx2label=lables_list[1]
 
+#所有的y_label，包括训练、测试、预测
 y=np.hstack((train_y,valid_y,test_y))
 y_prob=np.vstack((train_y_prob,valid_y_prob,test_y_prob))
 
@@ -176,7 +178,7 @@ elif cfg_vocab_adj=='all':
 norm_gcn_vocab_adj_list=[]
 for i in range(len(gcn_vocab_adj_list)):
     adj=gcn_vocab_adj_list[i] #.tocsr() #(lr是用非norm时的1/10)
-    print('  Zero ratio(?>66%%) for vocab adj %dth: %.8f'%(i, 100*(1-adj.count_nonzero()/(adj.shape[0]*adj.shape[1]))))
+    logger.info('  Zero ratio(?>66%%) for vocab adj %dth: %.8f'%(i, 100*(1-adj.count_nonzero()/(adj.shape[0]*adj.shape[1]))))
     adj=normalize_adj(adj)
     norm_gcn_vocab_adj_list.append(sparse_scipy2torch(adj.tocoo()).to(device))
 gcn_adj_list=norm_gcn_vocab_adj_list
@@ -184,6 +186,7 @@ gcn_adj_list=norm_gcn_vocab_adj_list
 
 del gcn_vocab_adj_tf,gcn_vocab_adj,gcn_vocab_adj_list
 gc.collect()
+logger.info("prepare data done!")
 
 train_classes_num, train_classes_weight = get_class_count_and_weight(train_y,len(label2idx))
 loss_weight=torch.tensor(train_classes_weight).to(device)
@@ -217,19 +220,21 @@ def get_pytorch_dataloader(examples, tokenizer, batch_size, shuffle_choice, clas
                                 num_workers=4,
                                 collate_fn=ds.pad)
 
+logger.info("data loader, get train/valid/test data, begin ~")
 train_dataloader = get_pytorch_dataloader(train_examples, tokenizer, batch_size, shuffle_choice=0 )
 valid_dataloader = get_pytorch_dataloader(valid_examples, tokenizer, batch_size, shuffle_choice=0 )
 test_dataloader = get_pytorch_dataloader(test_examples, tokenizer, batch_size, shuffle_choice=0 )
-
+logger.info("data loader, get train/valid/test data, done ~")
 
 # total_train_steps = int(len(train_examples) / batch_size / gradient_accumulation_steps * total_train_epochs)
 total_train_steps = int(len(train_dataloader) / gradient_accumulation_steps * total_train_epochs)
 
-print('  Train_classes count:', train_classes_num)
-print('  Num examples for train =',len(train_examples),', after weight sample:',len(train_dataloader)*batch_size)
-print("  Num examples for validate = %d"% len(valid_examples))
-print("  Batch size = %d"% batch_size)
-print("  Num steps = %d"% total_train_steps)
+logger.info('  Train_classes count:', train_classes_num)
+logger.info('  Num examples for train =',len(train_examples),', after weight sample:',len(train_dataloader)*batch_size)
+logger.info("  Num examples for validate = %d"
+      % len(valid_examples))
+logger.info("  Batch size = %d"% batch_size)
+logger.info("  Num steps = %d"% total_train_steps)
 
 
 #%%
@@ -255,7 +260,7 @@ def predict(model, examples, tokenizer, batch_size):
     return np.array(predict_out).reshape(-1), np.array(confidence_out).reshape(-1)
 
 def evaluate(model, gcn_adj_list,predict_dataloader, batch_size, epoch_th, dataset_name):
-    # print("***** Running prediction *****")
+    # logger.info("***** Running prediction *****")
     model.eval()
     predict_out = []
     all_label_ids = []
@@ -290,20 +295,20 @@ def evaluate(model, gcn_adj_list,predict_dataloader, batch_size, epoch_th, datas
 
         f1_metrics=f1_score(np.array(all_label_ids).reshape(-1),
             np.array(predict_out).reshape(-1), average='weighted')
-        print("Report:\n"+classification_report(np.array(all_label_ids).reshape(-1),
+        logger.info("Report:\n"+classification_report(np.array(all_label_ids).reshape(-1),
             np.array(predict_out).reshape(-1),digits=4))
 
     ev_acc = correct/total
     end = time.time()
-    print('Epoch : %d, %s: %.3f Acc : %.3f on %s, Spend:%.3f minutes for evaluation'
+    logger.info('Epoch : %d, %s: %.3f Acc : %.3f on %s, Spend:%.3f minutes for evaluation'
         % (epoch_th, ' '.join(perform_metrics_str), 100*f1_metrics, 100.*ev_acc, dataset_name,(end-start)/60.0))
-    print('--------------------------------------------------------------')
+    logger.info('--------------------------------------------------------------')
     return ev_loss, ev_acc, f1_metrics
 
 
 #%%
 from model_vgcn_bert import VGCN_Bert
-print("\n----- Running training -----")
+logger.info("\n----- Running training -----")
 if will_train_mode_from_checkpoint and os.path.exists(os.path.join(output_dir, model_file_save)):
     checkpoint = torch.load(os.path.join(output_dir, model_file_save), map_location='cpu')
     if 'step' in checkpoint:
@@ -320,7 +325,7 @@ if will_train_mode_from_checkpoint and os.path.exists(os.path.join(output_dir, m
     pretrained_dict_selected = {k: v for k, v in pretrained_dict.items() if k in net_state_dict}
     net_state_dict.update(pretrained_dict_selected)
     model.load_state_dict(net_state_dict)
-    print('Loaded the pretrain model:',model_file_save,', epoch:',checkpoint['epoch'],'step:',prev_save_step,'valid acc:',
+    logger.info('Loaded the pretrain model:',model_file_save,', epoch:',checkpoint['epoch'],'step:',prev_save_step,'valid acc:',
         checkpoint['valid_acc'],' '.join(perform_metrics_str)+'_valid:', checkpoint['perform_metrics'])
 
 else:
@@ -329,6 +334,7 @@ else:
     perform_metrics_prev = 0
     model = VGCN_Bert.from_pretrained(bert_model_scale, gcn_adj_dim=gcn_vocab_size, gcn_adj_num=len(gcn_adj_list),gcn_embedding_dim=gcn_embedding_dim, num_labels=len(label2idx))
     prev_save_step=-1
+    logger.info("Loaded model from ground!")
 
 model.to(device)
 
@@ -375,9 +381,9 @@ for epoch in range(start_epoch, total_train_epochs):
             optimizer.zero_grad()
             global_step_th += 1
         if step % 40 == 0:
-            print("Epoch:{}-{}/{}, Train {} Loss: {}, Cumulated time: {}m ".format(epoch, step, len(train_dataloader), cfg_loss_criterion,loss.item(),(time.time() - train_start)/60.0))
+            logger.info("Epoch:{}-{}/{}, Train {} Loss: {}, Cumulated time: {}m ".format(epoch, step, len(train_dataloader), cfg_loss_criterion,loss.item(),(time.time() - train_start)/60.0))
 
-    print('--------------------------------------------------------------')
+    logger.info('--------------------------------------------------------------')
     valid_loss,valid_acc,perform_metrics = evaluate(model, gcn_adj_list, valid_dataloader, batch_size, epoch, 'Valid_set')
     test_loss,_,test_f1 = evaluate(model, gcn_adj_list, test_dataloader, batch_size, epoch, 'Test_set')
     all_loss_list['train'].append(tr_loss)
@@ -385,7 +391,7 @@ for epoch in range(start_epoch, total_train_epochs):
     all_loss_list['test'].append(test_loss)
     all_f1_list['valid'].append(perform_metrics)
     all_f1_list['test'].append(test_f1)
-    print("Epoch:{} completed, Total Train Loss:{}, Valid Loss:{}, Spend {}m ".format(epoch, tr_loss, valid_loss, (time.time() - train_start)/60.0))
+    logger.info("Epoch:{} completed, Total Train Loss:{}, Valid Loss:{}, Spend {}m ".format(epoch, tr_loss, valid_loss, (time.time() - train_start)/60.0))
     # Save a checkpoint
     # if valid_acc > valid_acc_prev:
     if perform_metrics > perform_metrics_prev:
@@ -399,6 +405,6 @@ for epoch in range(start_epoch, total_train_epochs):
         # train_f1_when_valid_best=tr_f1
         valid_f1_best_epoch=epoch
 
-print('\n**Optimization Finished!,Total spend:',(time.time() - train_start)/60.0)
-print("**Valid weighted F1: %.3f at %d epoch."%(100*perform_metrics_prev,valid_f1_best_epoch))
-print("**Test weighted F1 when valid best: %.3f"%(100*test_f1_when_valid_best))
+logger.info('\n**Optimization Finished!,Total spend:',(time.time() - train_start)/60.0)
+logger.info("**Valid weighted F1: %.3f at %d epoch."%(100*perform_metrics_prev,valid_f1_best_epoch))
+logger.info("**Test weighted F1 when valid best: %.3f"%(100*test_f1_when_valid_best))
