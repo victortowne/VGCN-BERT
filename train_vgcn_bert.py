@@ -30,7 +30,7 @@ from pytorch_pretrained_bert.modeling import BertModel, BertConfig, WEIGHTS_NAME
 from pytorch_pretrained_bert.tokenization import BertTokenizer
 from pytorch_pretrained_bert.optimization import BertAdam #, warmup_linear
 from torch.utils.data import DataLoader
-logger = logging.getLogger(__name__)
+from mylog import logger
 from utils import *
 
 import random
@@ -49,7 +49,7 @@ Configuration
 '''
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--ds', type=str, default='mr') #data_type
+parser.add_argument('--ds', type=str, default='cola1') #data_type
 parser.add_argument('--load', type=int, default=0) #if load checkpoint
 parser.add_argument('--sw', type=int, default='0') #if delete stop words
 parser.add_argument('--dim', type=int, default='16') #gcn_embedding_dim
@@ -65,7 +65,7 @@ gcn_embedding_dim=args.dim
 learning_rate0=args.lr
 l2_decay=args.l2
 
-dataset_list={'sst', 'cola'}
+dataset_list={'sst', 'cola1'}
 # hate: 10k, mr: 6753, sst: 7792, r8: 5211
 
 total_train_epochs = 9 
@@ -75,7 +75,7 @@ if cfg_ds=='sst':
     learning_rate0 = 1e-5 #2e-5  
     # l2_decay = 0.001
     l2_decay = 0.01 #default
-elif cfg_ds=='cola':
+elif cfg_ds=='cola1':
     batch_size = 16 #12
     learning_rate0 = 8e-6 #2e-5  
     l2_decay = 0.001 
@@ -105,7 +105,7 @@ resample_train_set=False # if mse and resample, then do resample
 do_softmax_before_mse=True
 cfg_loss_criterion='cle'
 model_file_save=cfg_model_type+str(gcn_embedding_dim)+'_model_'+cfg_ds+'_'+cfg_loss_criterion+'_'+"sw"+str(int(cfg_stop_words))+'.pt'
-
+'''
 logger.info(cfg_model_type+' Start at:', time.asctime())
 logger.info('\n----- Configure -----',
     '\n  cfg_ds:',cfg_ds,
@@ -118,6 +118,7 @@ logger.info('\n----- Configure -----',
     '\n  MAX_SEQ_LENGTH:',MAX_SEQ_LENGTH,#'valid_data_taux',valid_data_taux,
     '\n  perform_metrics_str:',perform_metrics_str,
     '\n  model_file_save:',model_file_save)
+'''
 logger.info("parse arguments done!")
 
 
@@ -230,7 +231,7 @@ logger.info("data loader, get train/valid/test data, done ~")
 total_train_steps = int(len(train_dataloader) / gradient_accumulation_steps * total_train_epochs)
 
 logger.info('  Train_classes count:', train_classes_num)
-logger.info('  Num examples for train =',len(train_examples),', after weight sample:',len(train_dataloader)*batch_size)
+logger.info('  Num examples for train = {}, after weight sample:{}'.format(len(train_examples), len(train_dataloader)*batch_size))
 logger.info("  Num examples for validate = %d"
       % len(valid_examples))
 logger.info("  Batch size = %d"% batch_size)
