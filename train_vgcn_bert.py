@@ -76,7 +76,7 @@ if cfg_ds=='sst':
     # l2_decay = 0.001
     l2_decay = 0.01 #default
 elif cfg_ds=='cola1':
-    batch_size = 16 #12
+    batch_size = 4 #12
     learning_rate0 = 8e-6 #2e-5  
     l2_decay = 0.001 
 
@@ -370,8 +370,8 @@ for epoch in range(start_epoch, total_train_epochs):
             if loss_weight is None:
                 loss = F.cross_entropy(logits, label_ids)
             else:
-                loss_weight = loss_weight.double()
-                loss = F.cross_entropy(logits.view(-1, num_classes), label_ids, loss_weight)
+                loss_weight = loss_weight.float()
+                loss = F.cross_entropy(logits.view(-1, num_classes), label_ids.long(), loss_weight)
 
         if gradient_accumulation_steps > 1:
             loss = loss / gradient_accumulation_steps
